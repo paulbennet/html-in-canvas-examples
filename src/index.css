@@ -168,6 +168,55 @@ body {
   padding: 4px 11px;
 }
 
+/* ---------- Burn scene (Fire effect) ----------
+   NOTE: deliberately no :hover rules and no transitions on .burn__btn. A style
+   that changes while the pointer moves would fire `paint` on the canvas every
+   frame, forcing a texture re-upload. The fire IS the hover feedback. */
+.burn { display: flex; flex-direction: column; width: 100%; height: 100%; gap: 16px; }
+
+.burn__head { max-width: 52ch; }
+.burn__eyebrow {
+  margin: 0 0 8px; text-transform: uppercase; letter-spacing: 0.28em;
+  font-size: 11px; color: #ff9d4d; font-weight: 700;
+}
+.burn__title {
+  margin: 0 0 10px; font-size: clamp(26px, 4.4vw, 40px);
+  line-height: 1.08; letter-spacing: -0.02em; font-weight: 700;
+}
+.burn__body { margin: 0; color: var(--muted); line-height: 1.55; font-size: 15px; }
+.burn__body code {
+  background: rgba(255, 255, 255, 0.07); border-radius: 5px;
+  padding: 1px 5px; font-size: 13px;
+}
+
+/* Pushed to the bottom so the flames have the upper half to rise through. */
+.burn__grid {
+  margin-top: auto;
+  display: flex; flex-wrap: wrap; gap: 14px; align-items: center;
+}
+
+.burn__btn {
+  appearance: none; cursor: pointer;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--fg); font-weight: 700; font-size: 14px;
+  padding: 13px 20px; border-radius: 12px;
+}
+.burn__btn:focus-visible { outline: 2px solid #ffb347; outline-offset: 3px; }
+.burn__btn--primary {
+  border-color: transparent;
+  background: linear-gradient(120deg, var(--accent), var(--accent-2));
+  color: #0a0b12;
+}
+.burn__btn--danger {
+  border-color: rgba(255, 106, 90, 0.4);
+  background: rgba(255, 76, 60, 0.12);
+  color: #ffb4ab;
+}
+.burn__btn--icon { padding: 13px 17px; font-size: 17px; line-height: 1; }
+
+.burn__status { margin: 0; color: var(--muted); font-size: 13px; min-height: 18px; }
+
 /* ---------- Footer ---------- */
 .app__footer { display: flex; }
 .chip {

@@ -14,6 +14,7 @@ the pixels.
 | ---------- | ---------------------------------------------------------------- | ------------------ |
 | **Glass**  | Cursor-tracking lens: magnification + refraction + rim/specular  | Move the pointer   |
 | **Ripple** | Expanding wavefronts summed into a UV displacement               | Click to send      |
+| **Fire**   | Two-pass ping-pong heat simulation burning real `<button>` boxes | Hover / focus / click |
 | **Dither** | Luminance + 4×4 Bayer ordered dithering (1-bit phosphor look)    | —                  |
 | **Glitch** | Periodic RGB-split + horizontal slice tearing + grain            | — (time-driven)    |
 
@@ -27,11 +28,35 @@ The whole thing is a thin, shared core plus one small file per effect:
   keeps the canvas at the device-pixel box, and runs a render loop that re-uploads the live element via
   `gl.texElementImage2D(...)` and draws it through the effect shader.
 - [`src/effects/EffectCanvas.tsx`](src/effects/EffectCanvas.tsx) — base wrapper; picks the canvas path or the fallback path.
-- [`src/effects/shaders.ts`](src/effects/shaders.ts) — all four fragment shaders in one place.
-- [`src/effects/*.tsx`](src/effects/) — `Glass`, `Ripple`, `Dither`, `Glitch` (≈ a shader + a few uniforms each).
+- [`src/effects/shaders.ts`](src/effects/shaders.ts) — every fragment shader in one place.
+- [`src/effects/*.tsx`](src/effects/) — `Glass`, `Ripple`, `Fire`, `Dither`, `Glitch` (≈ a shader + a few uniforms each).
 
 Every shader receives the standard uniforms: `sampler2D u_tex`, `vec2 u_resolution`,
-`vec2 u_mouse` (UV space), `float u_time`, `float u_pointerDown`.
+`vec2 u_mouse` (UV space), `float u_time`, `float u_pointerDown`, `float u_pointerInside`,
+`float u_dt`.
+
+### Multi-pass simulation & element-aware effects
+
+Most effects are a pure function of the current frame. **Fire** is not — it needs heat to persist,
+rise and cool — so `useElementTexture` takes two optional extras. Effects that pass neither run the
+exact single-pass path they always did.
+
+- **`simulation`** — a second fragment shader rendered into a ping-pong pair of framebuffers before
+  the composite, receiving the previous state as `u_prev` and exposing the result to the composite as
+  `u_heat`. Targets are `RGBA8` at `scale` × the canvas resolution (see
+  `createPingPong` / `swapPingPong` in [`src/lib/webgl.ts`](src/lib/webgl.ts)). RGBA8 rather than
+  float is deliberate: it is the only format guaranteed both color-renderable *and* `LINEAR`-filterable
+  without extensions, and advection needs bilinear sampling.
+- **`targetSelector`** — a CSS selector resolved inside the live content. Matching elements are
+  measured with `getBoundingClientRect()` and handed to the effect as UV rects + corner radii on
+  `frame.targets`, so a shader can address individual DOM boxes (Fire builds a rounded-rect SDF per
+  button). Measurement is dirty-flagged on resize, on `paint`, and on a slow interval — never every
+  frame, since it forces layout.
+
+> **Gotcha worth knowing:** the shared quad vertex shader flips Y when deriving `v_uv`, so a pass
+> rendered through it stores the value for `v_uv` at texture row `1 - v_uv.y`. Every read of a
+> render target must undo that (`fieldUV()` in the fire shaders) or the field comes back mirrored
+> *and* the advection runs backwards.
 
 ### API signature note (the blog is stale)
 
@@ -141,9 +166,19 @@ npx playwright-cli goto "http://localhost:5173/?selftest"
 > separate CLI calls (each is its own process). Drive a short `setInterval` spawn
 > loop via `playwright-cli eval` so a fresh ripple is always on screen when you
 > screenshot.
+>
+> Fire is easier: hover is *sticky* across CLI calls (`mousemove` parks the cursor and no
+> `pointerleave` fires in between), so successive screenshots sample the ignition ramp naturally.
+> For reproducible frames, `?ign=0.0`–`1.0` pins every button's intensity instead of integrating it.
 
 ## Adding an effect
 
 1. Add a fragment shader to [`src/effects/shaders.ts`](src/effects/shaders.ts) (and to `ALL_SHADERS` so the self-test covers it).
 2. Create a component like [`src/effects/Dither.tsx`](src/effects/Dither.tsx) that renders `<EffectCanvas fragmentShader={...} />`; pass `setUniforms` / `onPointerDownUV` if it needs interaction.
-3. Register it in the `EFFECTS` array in [`src/App.tsx`](src/App.tsx).
+3. Register it in the `EFFECTS` array in [`src/App.tsx`](src/App.tsx). Give it a `Content` component if it needs its own scene rather than the shared demo card.
+
+Effects needing frame-to-frame state or per-element awareness additionally pass `simulation` and/or
+`targetSelector` (see [`src/effects/Fire.tsx`](src/effects/Fire.tsx)). If the effect brings its own
+scene, also give it a `mockScene` so `?mock` previews it in any browser — derive the scene's
+`targets()` from the same constants its `draw()` uses, or the mock flames will drift off the mock
+buttons.

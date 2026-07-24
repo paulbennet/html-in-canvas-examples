@@ -1,12 +1,45 @@
+import type { TargetRect } from './useElementTexture';
+
 /**
- * Mock content texture for `?mock` preview mode.
+ * A synthetic stand-in for one demo scene, used by `?mock` preview mode.
  *
  * The real HTML-in-Canvas API only exists in Chrome Canary, so on every other
  * browser the effects fall back to plain DOM and you can't SEE them. `?mock`
- * instead forces the WebGL path and feeds the shaders this synthetic, content-
- * like image (drawn with the Canvas 2D API) so each effect's visual behavior
- * can be previewed and screenshotted anywhere. It is NOT the live DOM — it's a
- * stand-in that mirrors the demo card so distortions read clearly.
+ * instead forces the WebGL path and feeds the shaders a synthetic, content-like
+ * image (drawn with the Canvas 2D API) so each effect's visual behavior can be
+ * previewed and screenshotted anywhere.
+ *
+ * Element-aware effects also need element boxes, which can't be measured in
+ * mock mode (the nested DOM is inert canvas fallback content). A scene therefore
+ * also reports synthetic `targets` derived from the very constants its `draw`
+ * uses, keeping mock geometry and mock effects provably in sync.
+ */
+export interface MockScene {
+  draw(ctx: CanvasRenderingContext2D, w: number, h: number, scale: number): void;
+  /** Synthetic stand-ins for `targetSelector` matches, in UV space. */
+  targets?(cssW: number, cssH: number): TargetRect[];
+}
+
+/** Helper: CSS-px box → the UV rect shape shaders expect. */
+export function mockTarget(
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  r: number,
+  cssW: number,
+  cssH: number,
+): TargetRect {
+  return {
+    uv: [x / cssW, y / cssH, (x + w) / cssW, (y + h) / cssH],
+    radiusUV: r / cssH,
+  };
+}
+
+/**
+ * The demo card (see components/DemoContent.tsx) — the default mock scene. It
+ * is NOT the live DOM: a stand-in that mirrors the card so distortions read
+ * clearly.
  */
 export function drawMockContent(
   ctx: CanvasRenderingContext2D,
@@ -102,7 +135,9 @@ export function drawMockContent(
   ctx.restore();
 }
 
-function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
+export const DEMO_MOCK_SCENE: MockScene = { draw: drawMockContent };
+
+export function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
   ctx.beginPath();
   ctx.moveTo(x + r, y);
   ctx.arcTo(x + w, y, x + w, y + h, r);

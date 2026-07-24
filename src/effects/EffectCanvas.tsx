@@ -1,10 +1,21 @@
 import { useRef, type ReactNode } from 'react';
 import { detectHtmlInCanvas } from '../lib/support';
-import { useElementTexture, type EffectFrame } from '../lib/useElementTexture';
+import {
+  useElementTexture,
+  type EffectFrame,
+  type SimulationPass,
+} from '../lib/useElementTexture';
+import type { MockScene } from '../lib/mockContent';
 
 export interface EffectCanvasProps {
   /** The effect's fragment shader (samples u_tex, the live content). */
   fragmentShader: string;
+  /** Optional feedback pass rendered into ping-pong framebuffers before the composite. */
+  simulation?: SimulationPass;
+  /** CSS selector for elements whose boxes the shader needs (see Fire). */
+  targetSelector?: string;
+  /** Which synthetic scene `?mock` should paint in place of this content. */
+  mockScene?: MockScene;
   /** Optional per-frame effect-specific uniform setter. */
   setUniforms?: (frame: EffectFrame) => void;
   /** Fired on pointer down with UV position + time (event-driven effects). */
@@ -26,6 +37,9 @@ export interface EffectCanvasProps {
  */
 export default function EffectCanvas({
   fragmentShader,
+  simulation,
+  targetSelector,
+  mockScene,
   setUniforms,
   onPointerDownUV,
   children,
@@ -39,6 +53,9 @@ export default function EffectCanvas({
     contentRef,
     fragmentShader,
     supported,
+    simulation,
+    targetSelector,
+    mockScene,
     setUniforms,
     onPointerDownUV,
   });

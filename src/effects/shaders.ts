@@ -156,10 +156,232 @@ void main() {
 }
 `;
 
+/* ---------------------------------------------------------------------------
+ * Fire — the first multi-pass, element-aware effect.
+ *
+ * Pass 1 (FIRE_SIM_FRAG) simulates a heat field into a ping-pong framebuffer:
+ * fuel is injected along each button's silhouette, burns into heat and soot,
+ * then rises and cools. Pass 2 (FIRE_FRAG) composites that field over the live
+ * element texture. Both address individual DOM buttons through a shared set of
+ * rounded-rect uniforms measured from real getBoundingClientRect() boxes.
+ * ------------------------------------------------------------------------- */
+
+/** Maximum simultaneously burning elements (uniform array size). */
+export const MAX_BURN = 4;
+
+/** GLSL shared by both fire passes: hashing, value noise, fbm, rounded-box SDF. */
+const FIRE_COMMON = /* glsl */ `
+uniform vec4 u_burnRect[${MAX_BURN}];   // xy = min UV, zw = max UV (top-left origin)
+uniform vec2 u_burnState[${MAX_BURN}];  // x = intensity 0..1, y = click flare 0..1
+uniform float u_burnRadius;             // corner radius, in units of canvas height
+
+float hash21(vec2 p) {
+  p = fract(p * vec2(123.34, 345.45));
+  p += dot(p, p + 34.345);
+  return fract(p.x * p.y);
+}
+
+float vnoise(vec2 p) {
+  vec2 i = floor(p), f = fract(p);
+  vec2 u = f * f * (3.0 - 2.0 * f);
+  return mix(mix(hash21(i), hash21(i + vec2(1.0, 0.0)), u.x),
+             mix(hash21(i + vec2(0.0, 1.0)), hash21(i + vec2(1.0, 1.0)), u.x), u.y);
+}
+
+// 3 octaves: enough structure for licking flames, cheap enough to run several
+// times per pixel at half resolution.
+float fbm(vec2 p) {
+  float v = 0.0, a = 0.5;
+  for (int i = 0; i < 3; i++) { v += a * vnoise(p); p = p * 2.03 + 19.7; a *= 0.5; }
+  return v;
+}
+
+// Signed distance to a rounded box centred at the origin. p and b are in
+// aspect-corrected UV (x scaled by aspect), where both axes share the same
+// unit — so a single scalar radius is correct.
+float sdRoundBox(vec2 p, vec2 b, float r) {
+  vec2 d = abs(p) - b + r;
+  return min(max(d.x, d.y), 0.0) + length(max(d, 0.0)) - r;
+}
+
+// The shared quad vertex shader flips Y when deriving v_uv, so a pass rendered
+// through it stores the value for v_uv at texture row (1 - v_uv.y). Every read
+// of the heat field must undo that, or the field comes back mirrored (and the
+// advection runs the wrong way).
+vec2 fieldUV(vec2 uv) { return vec2(uv.x, 1.0 - uv.y); }
+`;
+
+/**
+ * Fire pass 1 — the heat field simulation.
+ * Channels: R = heat, G = fuel, B = soot, A = 1.
+ */
+export const FIRE_SIM_FRAG = /* glsl */ `
+precision highp float;
+varying vec2 v_uv;
+uniform sampler2D u_prev;    // previous state (texture unit 1)
+uniform vec2 u_resolution;   // SIM target size, in px
+uniform float u_time;
+uniform float u_dt;
+${FIRE_COMMON}
+
+void main() {
+  float aspect = u_resolution.x / u_resolution.y;
+  float dt = clamp(u_dt, 0.0, 0.05);
+  vec2 ap = vec2(v_uv.x * aspect, v_uv.y);   // isotropic UV, unit = canvas height
+
+  // --- 1. advect upward with turbulence ----------------------------------
+  // v_uv.y grows DOWNWARD, so the parcel now here came from LARGER y.
+  vec2 turb = vec2(
+    fbm(ap * 7.5 + vec2(0.0, -u_time * 1.6)) - 0.5,
+    fbm(ap * 5.0 + vec2(4.7, -u_time * 1.05)) - 0.5);
+  vec2 vel = vec2(turb.x * 0.42, 0.62 + turb.y * 0.22);
+  vec4 prev = texture2D(u_prev, fieldUV(v_uv + vel * dt));
+
+  float heat = prev.r;
+  float fuel = prev.g;
+  float soot = prev.b;
+
+  // --- 2. inject fuel along each burning element's silhouette -------------
+  float inject = 0.0;
+  for (int i = 0; i < ${MAX_BURN}; i++) {
+    vec2 st = u_burnState[i];
+    float amt = st.x + st.y * 1.6;              // steady intensity + click flare
+    if (amt <= 0.002) continue;
+
+    vec4 r = u_burnRect[i];
+    vec2 c = (r.xy + r.zw) * 0.5;
+    vec2 h = (r.zw - r.xy) * 0.5;
+    vec2 p = vec2((v_uv.x - c.x) * aspect, v_uv.y - c.y);
+    vec2 b = vec2(h.x * aspect, h.y);
+    float rad = min(u_burnRadius, min(b.x, b.y));
+    float d = sdRoundBox(p, b, rad);
+
+    // Emit from a tight band on the outline, confined to the top of the box and
+    // the space above it. Flame then rises away from the button instead of
+    // across its face, which keeps the label readable at full blaze — and it is
+    // where flame detaches on a real burning object anyway.
+    float edge = exp(-d * d * 3400.0);
+    float ty = clamp((v_uv.y - r.y) / max(r.w - r.y, 1e-4), 0.0, 1.0);
+    float emit = smoothstep(0.62, 0.0, ty);     // 1 at/above the top edge
+    float body = smoothstep(0.004, -0.006, d) * 0.05;
+    inject = max(inject, amt * emit * (edge * 1.35 + body));
+  }
+  // Break the emitter into discrete licks — without this it reads as a strip.
+  float flick = fbm(ap * 22.0 + vec2(0.0, -u_time * 4.4));
+  fuel = max(fuel, inject * smoothstep(0.18, 0.72, flick) * 1.5);
+
+  // --- 3. combustion: fuel -> heat + soot ---------------------------------
+  float burned = fuel * clamp(6.5 * dt, 0.0, 1.0);
+  fuel -= burned;
+  heat += burned * 3.0;
+  soot += burned * 0.4;
+
+  // --- 4. cooling ---------------------------------------------------------
+  // Cool hard: bilinear advection is diffusive, so long-lived heat smears into
+  // blobs. A short lifetime plus a fast rise keeps the visible flame made of
+  // freshly injected — and therefore still structured — gas.
+  // The additive floor matters too: a purely multiplicative decay quantises to
+  // a stall point near 1/255 in an 8-bit target and leaves ghost trails.
+  heat *= exp(-4.2 * dt);
+  heat -= 0.70 * dt;
+  soot *= exp(-2.6 * dt);
+  soot -= 0.25 * dt;
+  fuel *= exp(-4.5 * dt);
+
+  // --- 5. dither: turn 8-bit quantisation into flicker, not banding -------
+  float dith = (hash21(v_uv * u_resolution + u_time * 61.0) - 0.5) / 255.0;
+
+  gl_FragColor = vec4(
+    clamp(heat + dith, 0.0, 1.0),
+    clamp(fuel + dith, 0.0, 1.0),
+    clamp(soot + dith, 0.0, 1.0),
+    1.0);
+}
+`;
+
+/** Fire pass 2 — composite the heat field over the live element. */
+export const FIRE_FRAG = /* glsl */ `
+precision highp float;
+varying vec2 v_uv;
+uniform sampler2D u_tex;    // live element (unit 0)
+uniform sampler2D u_heat;   // simulated field (unit 1)
+uniform vec2 u_resolution;
+uniform float u_time;
+${FIRE_COMMON}
+
+// black -> deep red -> orange -> yellow -> white
+vec3 fireRamp(float t) {
+  t = clamp(t, 0.0, 1.0);
+  vec3 c = mix(vec3(0.0), vec3(0.42, 0.04, 0.01), smoothstep(0.00, 0.22, t));
+  c = mix(c, vec3(1.00, 0.28, 0.02), smoothstep(0.18, 0.48, t));
+  c = mix(c, vec3(1.00, 0.76, 0.18), smoothstep(0.44, 0.76, t));
+  c = mix(c, vec3(1.00, 0.97, 0.86), smoothstep(0.74, 1.00, t));
+  return c;
+}
+
+void main() {
+  float aspect = u_resolution.x / u_resolution.y;
+  vec2 texel = 1.0 / u_resolution;
+  vec2 ap = vec2(v_uv.x * aspect, v_uv.y);
+
+  // Jitter the field lookup to hide bilinear diamonds from the half-res upsample.
+  vec2 jit = (vec2(hash21(v_uv * u_resolution), hash21(v_uv * u_resolution + 7.3)) - 0.5)
+           * texel * 1.5;
+  vec4 H = texture2D(u_heat, fieldUV(v_uv + jit));
+
+  // Heat-haze: hot air bends what's behind it. Offsets are in v_uv space and
+  // fieldUV maps them into the field, so hg stays a v_uv-space gradient.
+  float hL = texture2D(u_heat, fieldUV(v_uv - vec2(texel.x, 0.0))).r;
+  float hR = texture2D(u_heat, fieldUV(v_uv + vec2(texel.x, 0.0))).r;
+  float hU = texture2D(u_heat, fieldUV(v_uv - vec2(0.0, texel.y))).r;
+  float hD = texture2D(u_heat, fieldUV(v_uv + vec2(0.0, texel.y))).r;
+  vec2 hg = vec2(hR - hL, hD - hU);
+  vec2 uv = v_uv + hg * 0.018 * smoothstep(0.02, 0.5, H.r);
+
+  vec4 src = texture2D(u_tex, uv);
+  vec3 col = src.rgb;
+
+  // A reversible heat glow on the rim of each burning element — the buttons
+  // never char or erode, they just run hot.
+  float rim = 0.0;
+  for (int i = 0; i < ${MAX_BURN}; i++) {
+    vec2 st = u_burnState[i];
+    if (st.x <= 0.002) continue;
+    vec4 r = u_burnRect[i];
+    vec2 c = (r.xy + r.zw) * 0.5;
+    vec2 h = (r.zw - r.xy) * 0.5;
+    vec2 p = vec2((v_uv.x - c.x) * aspect, v_uv.y - c.y);
+    vec2 b = vec2(h.x * aspect, h.y);
+    float rad = min(u_burnRadius, min(b.x, b.y));
+    float d = sdRoundBox(p, b, rad);
+    rim = max(rim, (st.x + st.y) * exp(-d * d * 11000.0));
+  }
+
+  col *= mix(1.0, 0.72, clamp(H.b * 1.4, 0.0, 1.0));   // soot absorbs
+  col += fireRamp(H.r * 1.18) * (0.8 + 0.85 * H.r);    // flame, additive
+  col += vec3(1.0, 0.42, 0.10) * rim * 0.42;           // rim heat glow
+
+  // Embers: sparse cells drifting up, gated by local heat.
+  vec2 gp = ap * 95.0 + vec2(0.0, -u_time * 5.0);
+  float rnd = hash21(floor(gp));
+  float spark = step(0.988, rnd)
+              * smoothstep(0.34, 0.0, length(fract(gp) - 0.5))
+              * (0.45 + 0.55 * sin(u_time * 26.0 + rnd * 51.0))
+              * smoothstep(0.04, 0.28, H.r);
+  col += vec3(1.0, 0.62, 0.22) * spark * 1.6;
+
+  // Keep the card opaque, but let flames and embers extend past its box.
+  float fireA = smoothstep(0.015, 0.22, H.r) + spark;
+  gl_FragColor = vec4(col, clamp(max(src.a, fireA), 0.0, 1.0));
+}
+`;
+
 /** Registry used by the shader self-test. */
 export const ALL_SHADERS: { name: string; frag: string }[] = [
   { name: 'Dither', frag: DITHER_FRAG },
   { name: 'Glitch', frag: GLITCH_FRAG },
   { name: 'Glass', frag: GLASS_FRAG },
   { name: 'Ripple', frag: RIPPLE_FRAG },
+  { name: 'Fire', frag: FIRE_FRAG },
+  { name: 'Fire Sim', frag: FIRE_SIM_FRAG },
 ];

@@ -1,22 +1,27 @@
 import { useState } from 'react';
 import { detectHtmlInCanvas, mockEnabled } from './lib/support';
+import BurnContent from './components/BurnContent';
 import DemoContent from './components/DemoContent';
 import SupportBanner from './components/SupportBanner';
 import Dither from './effects/Dither';
+import Fire from './effects/Fire';
 import Glitch from './effects/Glitch';
 import Ripple from './effects/Ripple';
 import Glass from './effects/Glass';
 
-type EffectKey = 'dither' | 'glitch' | 'ripple' | 'glass';
+type EffectKey = 'dither' | 'fire' | 'glitch' | 'ripple' | 'glass';
 
 const EFFECTS: {
   key: EffectKey;
   label: string;
   hint: string;
   Component: (props: { children: React.ReactNode }) => React.ReactElement;
+  /** Scene to apply the effect to. Most effects share the demo card. */
+  Content?: () => React.ReactElement;
 }[] = [
   { key: 'glass', label: 'Glass', hint: 'Move the cursor — a lens magnifies & refracts the content.', Component: Glass },
   { key: 'ripple', label: 'Ripple', hint: 'Click anywhere to send water ripples across the surface.', Component: Ripple },
+  { key: 'fire', label: 'Fire', hint: 'Every button is smouldering. Hover one to fan it into a blaze — then click it.', Component: Fire, Content: BurnContent },
   { key: 'dither', label: 'Dither', hint: '1-bit Bayer dithering — a crisp retro monochrome pass.', Component: Dither },
   { key: 'glitch', label: 'Glitch', hint: 'Intermittent RGB-split and slice-tearing bursts.', Component: Glitch },
 ];
@@ -27,6 +32,7 @@ export default function App() {
   const [active, setActive] = useState<EffectKey>('glass');
   const current = EFFECTS.find((e) => e.key === active)!;
   const Effect = current.Component;
+  const Content = current.Content ?? DemoContent;
 
   return (
     <div className="app">
@@ -60,7 +66,7 @@ export default function App() {
       <main className="app__stage">
         {/* key forces a clean remount (and GL rebuild) when switching effects. */}
         <Effect key={active}>
-          <DemoContent />
+          <Content />
         </Effect>
       </main>
 
