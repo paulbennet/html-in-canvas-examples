@@ -1,0 +1,12 @@
+{
+  "browser": {
+    "launchOptions": {
+      "headless": false,
+      "args": [
+        "--enable-features=CanvasDrawElement",
+        "--enable-blink-features=CanvasDrawElement",
+        "--enable-experimental-web-platform-features"
+      ]
+    }
+  }
+}

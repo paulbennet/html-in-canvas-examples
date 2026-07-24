@@ -1,13 +1,34 @@
 {
   "name": "html-in-canvas-examples",
   "version": "1.0.0",
-  "main": "index.js",
+  "description": "CanvasUI-style creative effects built on Chrome's HTML-in-Canvas API",
+  "private": true,
+  "type": "module",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview",
+    "demo:live": "playwright-cli open --config=pw-canvas.config.json http://localhost:5173/",
+    "demo:close": "playwright-cli close"
   },
-  "keywords": [],
+  "keywords": [
+    "html-in-canvas",
+    "canvas",
+    "webgl",
+    "drawElement",
+    "layoutsubtree"
+  ],
   "author": "",
-  "license": "ISC",
-  "type": "commonjs",
-  "description": ""
+  "license": "MIT",
+  "dependencies": {
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^4.3.4",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.0"
+  }
 }
