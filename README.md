@@ -14,7 +14,7 @@ the pixels.
 | ---------- | ---------------------------------------------------------------- | ------------------ |
 | **Glass**  | Cursor-tracking lens: magnification + refraction + rim/specular  | Move the pointer   |
 | **Ripple** | Expanding wavefronts summed into a UV displacement               | Click to send      |
-| **Fire**   | Two-pass ping-pong heat simulation burning real `<button>` boxes | Hover / focus / click |
+| **Fire**   | Two-pass ping-pong heat simulation; a power-up aura around real `<button>` boxes | Hover / focus, then mash |
 | **Dither** | Luminance + 4×4 Bayer ordered dithering (1-bit phosphor look)    | —                  |
 | **Glitch** | Periodic RGB-split + horizontal slice tearing + grain            | — (time-driven)    |
 
@@ -46,7 +46,9 @@ exact single-pass path they always did.
   `u_heat`. Targets are `RGBA8` at `scale` × the canvas resolution (see
   `createPingPong` / `swapPingPong` in [`src/lib/webgl.ts`](src/lib/webgl.ts)). RGBA8 rather than
   float is deliberate: it is the only format guaranteed both color-renderable *and* `LINEAR`-filterable
-  without extensions, and advection needs bilinear sampling.
+  without extensions, and advection needs bilinear sampling. All four channels are state — Fire packs
+  `R=heat, G=fuel, B=soot, A=tier tag` — so render targets are cleared fully transparent and nothing
+  may assume alpha is opaque.
 - **`targetSelector`** — a CSS selector resolved inside the live content. Matching elements are
   measured with `getBoundingClientRect()` and handed to the effect as UV rects + corner radii on
   `frame.targets`, so a shader can address individual DOM boxes (Fire builds a rounded-rect SDF per
@@ -57,6 +59,11 @@ exact single-pass path they always did.
 > rendered through it stores the value for `v_uv` at texture row `1 - v_uv.y`. Every read of a
 > render target must undo that (`fieldUV()` in the fire shaders) or the field comes back mirrored
 > *and* the advection runs backwards.
+
+> **Second gotcha:** anything varying *per element* that colours the flame must travel **in the
+> field**, not be looked up per-pixel from the nearest element. Fire's tier rides in the sim's alpha
+> channel and advects with the gas. Picking the tier from the nearest rect instead puts a hard seam
+> down the midpoint between two buttons, where the nearest-element choice flips.
 
 ### API signature note (the blog is stale)
 
@@ -168,8 +175,16 @@ npx playwright-cli goto "http://localhost:5173/?selftest"
 > screenshot.
 >
 > Fire is easier: hover is *sticky* across CLI calls (`mousemove` parks the cursor and no
-> `pointerleave` fires in between), so successive screenshots sample the ignition ramp naturally.
-> For reproducible frames, `?ign=0.0`–`1.0` pins every button's intensity instead of integrating it.
+> `pointerleave` fires in between), so successive screenshots sample the ramp naturally. For
+> reproducible frames, `?charge=0.0`–`1.0` pins the **first** button's charge (only the first,
+> since you can only ever charge one at a time — pinning all four would misrepresent the look).
+> To exercise the click-to-charge path, drive a mash loop via `eval`:
+>
+> ```js
+> const b = document.querySelector('.burn__btn'), r = b.getBoundingClientRect();
+> setInterval(() => b.dispatchEvent(new PointerEvent('pointerdown',
+>   { clientX: r.left + r.width / 2, clientY: r.top + r.height / 2, bubbles: true })), 90);
+> ```
 
 ## Adding an effect
 

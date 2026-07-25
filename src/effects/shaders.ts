@@ -159,11 +159,16 @@ void main() {
 /* ---------------------------------------------------------------------------
  * Fire — the first multi-pass, element-aware effect.
  *
- * Pass 1 (FIRE_SIM_FRAG) simulates a heat field into a ping-pong framebuffer:
- * fuel is injected along each button's silhouette, burns into heat and soot,
- * then rises and cools. Pass 2 (FIRE_FRAG) composites that field over the live
- * element texture. Both address individual DOM buttons through a shared set of
- * rounded-rect uniforms measured from real getBoundingClientRect() boxes.
+ * The look is a power-up AURA, not a campfire: fuel is injected in an envelope
+ * that hugs the whole silhouette of each button — sides and underneath included
+ * — so the element sits *inside* the flame rather than beneath it. Clicking
+ * charges the button through discrete tiers, each with its own colour and
+ * features (gold, then white-gold with crackling arcs, then a blue-white core).
+ *
+ * Pass 1 (FIRE_SIM_FRAG) simulates the heat field into a ping-pong framebuffer;
+ * pass 2 (FIRE_FRAG) composites it over the live element texture. Both address
+ * individual DOM buttons through rounded-rect uniforms measured from real
+ * getBoundingClientRect() boxes.
  * ------------------------------------------------------------------------- */
 
 /** Maximum simultaneously burning elements (uniform array size). */
@@ -172,7 +177,10 @@ export const MAX_BURN = 4;
 /** GLSL shared by both fire passes: hashing, value noise, fbm, rounded-box SDF. */
 const FIRE_COMMON = /* glsl */ `
 uniform vec4 u_burnRect[${MAX_BURN}];   // xy = min UV, zw = max UV (top-left origin)
-uniform vec2 u_burnState[${MAX_BURN}];  // x = intensity 0..1, y = click flare 0..1
+// x = charge 0..1 (continuous: drives aura size / heat)
+// y = tier 0..1 (quantised: drives colour + features, so transformations snap)
+// z = click pop 0..1 (transient impulse)
+uniform vec3 u_burnState[${MAX_BURN}];
 uniform float u_burnRadius;             // corner radius, in units of canvas height
 
 float hash21(vec2 p) {
@@ -232,21 +240,25 @@ void main() {
   // --- 1. advect upward with turbulence ----------------------------------
   // v_uv.y grows DOWNWARD, so the parcel now here came from LARGER y.
   vec2 turb = vec2(
-    fbm(ap * 7.5 + vec2(0.0, -u_time * 1.6)) - 0.5,
+    fbm(ap * 5.5 + vec2(0.0, -u_time * 1.6)) - 0.5,
     fbm(ap * 5.0 + vec2(4.7, -u_time * 1.05)) - 0.5);
-  vec2 vel = vec2(turb.x * 0.42, 0.62 + turb.y * 0.22);
+  // Strong lateral turbulence: without it the aura advects straight up and
+  // reads as a rectangular beam rather than a flame that tapers and licks.
+  vec2 vel = vec2(turb.x * 0.78, 0.62 + turb.y * 0.26);
   vec4 prev = texture2D(u_prev, fieldUV(v_uv + vel * dt));
 
   float heat = prev.r;
   float fuel = prev.g;
   float soot = prev.b;
 
-  // --- 2. inject fuel along each burning element's silhouette -------------
+  // --- 2. inject fuel in an aura envelope around each element -------------
   float inject = 0.0;
+  float injTier = 0.0;
   for (int i = 0; i < ${MAX_BURN}; i++) {
-    vec2 st = u_burnState[i];
-    float amt = st.x + st.y * 1.6;              // steady intensity + click flare
-    if (amt <= 0.002) continue;
+    vec3 st = u_burnState[i];
+    float charge = st.x;
+    float amt = charge + st.z * 0.55;           // sustained charge + click pop
+    if (amt <= 0.004) continue;
 
     vec4 r = u_burnRect[i];
     vec2 c = (r.xy + r.zw) * 0.5;
@@ -256,19 +268,31 @@ void main() {
     float rad = min(u_burnRadius, min(b.x, b.y));
     float d = sdRoundBox(p, b, rad);
 
-    // Emit from a tight band on the outline, confined to the top of the box and
-    // the space above it. Flame then rises away from the button instead of
-    // across its face, which keeps the label readable at full blaze — and it is
-    // where flame detaches on a real burning object anyway.
-    float edge = exp(-d * d * 3400.0);
-    float ty = clamp((v_uv.y - r.y) / max(r.w - r.y, 1e-4), 0.0, 1.0);
-    float emit = smoothstep(0.62, 0.0, ty);     // 1 at/above the top edge
-    float body = smoothstep(0.004, -0.006, d) * 0.05;
-    inject = max(inject, amt * emit * (edge * 1.35 + body));
+    // The envelope: a band that hugs the silhouette on BOTH sides (d is
+    // signed, d*d is not) so the element ends up inside the flame rather than
+    // under it. It widens with charge — that is most of the "powering up" read.
+    float w = mix(0.008, 0.030, charge);
+    float band = exp(-(d * d) / (w * w));
+
+    // Interior fill only really arrives at high tiers, so low tiers stay
+    // readable and max tier genuinely engulfs the label.
+    float core = smoothstep(0.005, -0.012, d) * charge * charge * 0.18;
+
+    // Feed mainly from below: fuel introduced under the box streams up through
+    // and around it, which is what makes an aura wrap instead of just outline.
+    float tyRaw = (v_uv.y - r.y) / max(r.w - r.y, 1e-4);   // 0 top, 1 bottom
+    float below = smoothstep(-0.25, 1.15, tyRaw);
+    float feed = 0.5 + 0.95 * below;
+
+    // Track which element wins this pixel so its tier can be tagged onto the
+    // gas below — a compare rather than max(), since we need the paired tier.
+    float contrib = amt * (band * feed * 0.85 + core);
+    if (contrib > inject) { inject = contrib; injTier = st.y; }
   }
-  // Break the emitter into discrete licks — without this it reads as a strip.
-  float flick = fbm(ap * 22.0 + vec2(0.0, -u_time * 4.4));
-  fuel = max(fuel, inject * smoothstep(0.18, 0.72, flick) * 1.5);
+  // Break the emitter up — but less aggressively than a campfire, since an aura
+  // reads as a coherent sheet with licks rather than separate tongues.
+  float flick = fbm(ap * 19.0 + vec2(0.0, -u_time * 4.0));
+  fuel = max(fuel, inject * (0.55 + 0.85 * smoothstep(0.15, 0.8, flick)));
 
   // --- 3. combustion: fuel -> heat + soot ---------------------------------
   float burned = fuel * clamp(6.5 * dt, 0.0, 1.0);
@@ -288,14 +312,22 @@ void main() {
   soot -= 0.25 * dt;
   fuel *= exp(-4.5 * dt);
 
-  // --- 5. dither: turn 8-bit quantisation into flicker, not banding -------
+  // --- 5. tier tag, carried by the gas ------------------------------------
+  // Alpha stores the tier of whichever element emitted this parcel, and it
+  // advects with everything else. Picking the tier per-pixel from the *nearest*
+  // element instead would put a hard seam down the midpoint between two
+  // buttons, because tier would jump discontinuously across that boundary.
+  // Tagging the gas means the colour simply travels with the flame.
+  float tag = mix(prev.a, injTier, clamp(inject * 5.0, 0.0, 1.0));
+
+  // --- 6. dither: turn 8-bit quantisation into flicker, not banding -------
   float dith = (hash21(v_uv * u_resolution + u_time * 61.0) - 0.5) / 255.0;
 
   gl_FragColor = vec4(
     clamp(heat + dith, 0.0, 1.0),
     clamp(fuel + dith, 0.0, 1.0),
     clamp(soot + dith, 0.0, 1.0),
-    1.0);
+    clamp(tag, 0.0, 1.0));
 }
 `;
 
@@ -341,11 +373,22 @@ void main() {
   vec4 src = texture2D(u_tex, uv);
   vec3 col = src.rgb;
 
-  // A reversible heat glow on the rim of each burning element — the buttons
-  // never char or erode, they just run hot.
+  // The aura's tier travels with the gas (see the sim's alpha channel), so the
+  // colour is continuous everywhere — no seam between neighbouring buttons.
+  float tier = H.a;
+
+  // Rim and arcs are element-local: both fall off within a few thousandths of
+  // a UV unit, far tighter than the gap between buttons, so taking the max
+  // across elements introduces no visible discontinuity.
   float rim = 0.0;
+  float arc = 0.0;
+  float n1 = fbm(ap * 15.0 + vec2(0.0, -u_time * 2.2));
+  float n2 = fbm(ap * 33.0 + vec2(7.1, -u_time * 3.9));
+  float s1 = step(0.42, hash21(vec2(floor(u_time * 23.0), 3.7)));
+  float s2 = step(0.58, hash21(vec2(floor(u_time * 17.0), 9.1)));
+
   for (int i = 0; i < ${MAX_BURN}; i++) {
-    vec2 st = u_burnState[i];
+    vec3 st = u_burnState[i];
     if (st.x <= 0.002) continue;
     vec4 r = u_burnRect[i];
     vec2 c = (r.xy + r.zw) * 0.5;
@@ -354,21 +397,59 @@ void main() {
     vec2 b = vec2(h.x * aspect, h.y);
     float rad = min(u_burnRadius, min(b.x, b.y));
     float d = sdRoundBox(p, b, rad);
-    rim = max(rim, (st.x + st.y) * exp(-d * d * 11000.0));
+
+    rim = max(rim, st.x * exp(-d * d * 11000.0));
+
+    // Crackling arcs from tier 3: wobble the distance field with noise and draw
+    // thin contours where it crosses zero, strobed on and off by a hash so they
+    // read as electricity rather than as a static ring.
+    float aAmt = smoothstep(0.45, 0.8, st.y);
+    if (aAmt > 0.001) {
+      // Offset the contours OUTSIDE the silhouette: drawn on the outline they
+      // land inside the white-hot core and are invisible. Out here they cross
+      // the dark fringe and read as discharges leaving the element.
+      float dw = d - 0.032 + (n1 - 0.5) * 0.095 + (n2 - 0.5) * 0.035;
+      arc = max(arc, aAmt * (exp(-dw * dw * 7000.0) * s1
+                           + exp(-(dw - 0.038) * (dw - 0.038) * 9000.0) * s2 * 0.7));
+    }
   }
 
   col *= mix(1.0, 0.72, clamp(H.b * 1.4, 0.0, 1.0));   // soot absorbs
-  col += fireRamp(H.r * 1.18) * (0.8 + 0.85 * H.r);    // flame, additive
-  col += vec3(1.0, 0.42, 0.10) * rim * 0.42;           // rim heat glow
+
+  // Everything emissive accumulates here and is tone-mapped once at the end.
+  // Adding these straight to the colour clips them to flat white, which
+  // destroys what distinguishes the tiers: hue and internal structure.
+  vec3 emis = vec3(0.0);
+
+  // --- the aura, coloured by tier -----------------------------------------
+  // Higher tiers push the ramp hotter, then tint it: gold at mid tiers, a
+  // blue-white core at the peak. Tinting multiplicatively (rather than mixing
+  // toward a flat colour) keeps the ramp's structure legible.
+  vec3 flame = fireRamp(H.r * (1.0 + tier * 0.45)) * (0.85 + 0.5 * H.r);
+  flame *= mix(vec3(1.0), vec3(1.0, 0.88, 0.40), smoothstep(0.2, 0.55, tier));
+  // Peak tier runs blue-white at the core. Mix toward the colour rather than
+  // multiplying by it: multiplying a warm flame by a cyan tint zeroes red
+  // before it can raise blue, which reads as olive green.
+  flame = mix(flame, vec3(0.55, 0.80, 1.0) * (0.9 + 0.6 * H.r),
+              smoothstep(0.55, 1.0, H.r) * smoothstep(0.68, 1.0, tier) * 0.85);
+  emis += flame;
+
+  // Rim: the element's own outline running hot, whitening with tier.
+  emis += mix(vec3(1.0, 0.42, 0.10), vec3(1.0, 0.93, 0.72), tier) * rim * (0.42 + 0.7 * tier);
+  emis += vec3(0.72, 0.90, 1.0) * arc * 2.6;
 
   // Embers: sparse cells drifting up, gated by local heat.
   vec2 gp = ap * 95.0 + vec2(0.0, -u_time * 5.0);
   float rnd = hash21(floor(gp));
-  float spark = step(0.988, rnd)
+  float spark = step(0.986, rnd)
               * smoothstep(0.34, 0.0, length(fract(gp) - 0.5))
               * (0.45 + 0.55 * sin(u_time * 26.0 + rnd * 51.0))
               * smoothstep(0.04, 0.28, H.r);
-  col += vec3(1.0, 0.62, 0.22) * spark * 1.6;
+  emis += mix(vec3(1.0, 0.62, 0.22), vec3(0.85, 0.95, 1.0), tier) * spark * 1.8;
+
+  // Filmic-ish exposure: compresses the highlights so the core keeps its hue
+  // instead of saturating, while leaving low values essentially linear.
+  col += 1.0 - exp(-emis * 1.3);
 
   // Keep the card opaque, but let flames and embers extend past its box.
   float fireA = smoothstep(0.015, 0.22, H.r) + spark;

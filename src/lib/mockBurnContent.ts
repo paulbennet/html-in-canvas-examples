@@ -64,7 +64,7 @@ function draw(ctx: CanvasRenderingContext2D, w: number, h: number, scale: number
 
   ctx.fillStyle = '#ff9d4d';
   ctx.font = '700 12px ui-sans-serif, system-ui, sans-serif';
-  ctx.fillText('E V E R Y T H I N G   I S   O N   F I R E', PAD_X, y);
+  ctx.fillText('P O W E R   L E V E L   R I S I N G', PAD_X, y);
   y += 52;
 
   ctx.fillStyle = '#eef0f8';
@@ -75,9 +75,9 @@ function draw(ctx: CanvasRenderingContext2D, w: number, h: number, scale: number
   ctx.fillStyle = '#9aa0b5';
   ctx.font = '400 15px ui-sans-serif, system-ui, sans-serif';
   for (const line of [
-    'Each button is a live <button> element, sampled into a WebGL',
-    'heat simulation. They smoulder on their own — hover one to fan',
-    'it into a blaze. Click while engulfed: it still works.',
+    'Each button is a live <button> element, wrapped in a WebGL heat',
+    'simulation. Hover one to engulf it — then keep clicking to charge',
+    'it through the tiers. Stop mashing and it powers back down.',
   ]) {
     ctx.fillText(line, PAD_X, y);
     y += 24;
@@ -117,7 +117,7 @@ function draw(ctx: CanvasRenderingContext2D, w: number, h: number, scale: number
   ctx.fillStyle = '#9aa0b5';
   ctx.font = '400 13px ui-sans-serif, system-ui, sans-serif';
   ctx.fillText(
-    'State updates beneath the flames. Try the keyboard: Tab, then Space.',
+    'State updates inside the aura. Try the keyboard: Tab, then hold Space.',
     PAD_X,
     BTN_Y + BTN_H + 30,
   );

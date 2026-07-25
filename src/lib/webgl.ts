@@ -145,8 +145,9 @@ export function createRenderTarget(
       `Framebuffer incomplete (0x${status.toString(16)}) at ${width}x${height}.`,
     );
   }
-  // Start from a known state (A=1) rather than relying on zero-fill.
-  gl.clearColor(0, 0, 0, 1);
+  // Start fully zeroed. All four channels are simulation state (Fire uses alpha
+  // to carry a per-parcel tag), so nothing here may be assumed opaque.
+  gl.clearColor(0, 0, 0, 0);
   gl.clear(gl.COLOR_BUFFER_BIT);
   gl.bindFramebuffer(gl.FRAMEBUFFER, null);
 
@@ -166,7 +167,7 @@ export function resizeRenderTarget(
   rt.width = width;
   rt.height = height;
   gl.bindFramebuffer(gl.FRAMEBUFFER, rt.fbo);
-  gl.clearColor(0, 0, 0, 1);
+  gl.clearColor(0, 0, 0, 0);
   gl.clear(gl.COLOR_BUFFER_BIT);
   gl.bindFramebuffer(gl.FRAMEBUFFER, null);
 }

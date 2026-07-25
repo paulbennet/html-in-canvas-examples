@@ -26,13 +26,13 @@ export default function BurnContent() {
   return (
     <div className="burn">
       <div className="burn__head">
-        <p className="burn__eyebrow">Everything is on fire</p>
+        <p className="burn__eyebrow">Power level rising</p>
         <h1 className="burn__title">Buttons that burn.</h1>
         <p className="burn__body">
           Each button is a live <code>&lt;button&gt;</code> element, laid out by the
-          browser and sampled into a WebGL heat simulation. They smoulder on their
-          own — hover one to fan it into a blaze, or tab through them. Click while
-          engulfed: it still works.
+          browser and wrapped in a WebGL heat simulation. Hover one to engulf it —
+          then <strong>keep clicking</strong> to charge it through the tiers. The
+          charge bleeds off, so stop mashing and it powers back down.
         </p>
       </div>
 
@@ -67,7 +67,7 @@ export default function BurnContent() {
       <p className="burn__status" aria-live="polite">
         {deleted > 0
           ? `Deleted everything ${deleted}× — and the DOM is still alive.`
-          : 'State updates beneath the flames. Try the keyboard: Tab, then Space.'}
+          : 'State updates inside the aura. Try the keyboard: Tab, then hold Space.'}
       </p>
     </div>
   );

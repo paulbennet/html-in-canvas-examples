@@ -189,10 +189,12 @@ body {
   padding: 1px 5px; font-size: 13px;
 }
 
-/* Pushed to the bottom so the flames have the upper half to rise through. */
+/* Pushed low so the aura has the upper half to stream into, but held clear of
+   the bottom edge so it can also wrap underneath each button. */
 .burn__grid {
   margin-top: auto;
-  display: flex; flex-wrap: wrap; gap: 14px; align-items: center;
+  margin-bottom: 26px;
+  display: flex; flex-wrap: wrap; gap: 22px; align-items: center;
 }
 
 .burn__btn {

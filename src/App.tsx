@@ -21,7 +21,7 @@ const EFFECTS: {
 }[] = [
   { key: 'glass', label: 'Glass', hint: 'Move the cursor — a lens magnifies & refracts the content.', Component: Glass },
   { key: 'ripple', label: 'Ripple', hint: 'Click anywhere to send water ripples across the surface.', Component: Ripple },
-  { key: 'fire', label: 'Fire', hint: 'Every button is smouldering. Hover one to fan it into a blaze — then click it.', Component: Fire, Content: BurnContent },
+  { key: 'fire', label: 'Fire', hint: 'Hover a button to engulf it in an aura — then keep clicking to charge it through the tiers.', Component: Fire, Content: BurnContent },
   { key: 'dither', label: 'Dither', hint: '1-bit Bayer dithering — a crisp retro monochrome pass.', Component: Dither },
   { key: 'glitch', label: 'Glitch', hint: 'Intermittent RGB-split and slice-tearing bursts.', Component: Glitch },
 ];
